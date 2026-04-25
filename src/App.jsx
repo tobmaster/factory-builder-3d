@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Text } from '@react-three/drei';
+import MovingItem from './MovingItem.jsx';
 
 const types = [
   { id: 'press', label: 'Press', color: '#2563eb' },
@@ -11,18 +12,25 @@ const types = [
 
 const snap = (v) => Math.round(v);
 
-function Conveyor({ from, to }) {
+function Conveyor({ from, to, running, speed }) {
   const dx = to.x - from.x;
   const dz = to.z - from.z;
   const length = Math.sqrt(dx * dx + dz * dz);
   const angle = Math.atan2(dz, dx);
+  const itemCount = Math.max(1, Math.floor(length / 2));
+
   return (
-    <group position={[(from.x + to.x) / 2, 0.08, (from.z + to.z) / 2]} rotation={[0, -angle, 0]}>
-      <mesh>
-        <boxGeometry args={[length, 0.12, 0.35]} />
-        <meshStandardMaterial color="#334155" />
-      </mesh>
-    </group>
+    <>
+      <group position={[(from.x + to.x) / 2, 0.08, (from.z + to.z) / 2]} rotation={[0, -angle, 0]}>
+        <mesh>
+          <boxGeometry args={[length, 0.12, 0.35]} />
+          <meshStandardMaterial color="#334155" />
+        </mesh>
+      </group>
+      {running && Array.from({ length: itemCount }).map((_, i) => (
+        <MovingItem key={i} from={from} to={to} offset={i / itemCount} speed={speed} />
+      ))}
+    </>
   );
 }
 
@@ -56,8 +64,10 @@ export default function App(){
   const [type,setType]=useState('press');
   const [sel,setSel]=useState(null);
   const [connectFrom,setConnectFrom]=useState(null);
-  const selected = machines.find(m=>m.id===sel);
+  const [running,setRunning]=useState(true);
+  const [speed,setSpeed]=useState(0.4);
 
+  const selected = machines.find(m=>m.id===sel);
   const byId = useMemo(()=>Object.fromEntries(machines.map(m=>[m.id,m])),[machines]);
 
   function add(x,z){
@@ -66,6 +76,7 @@ export default function App(){
     setMachines([...machines,{id,type,name:`${t.label} ${machines.length+1}`,x,z}]);
     setSel(id);
   }
+
   function select(id){
     if(connectFrom && connectFrom!==id){
       setBelts([...belts,{id:String(Date.now()),from:connectFrom,to:id}]);
@@ -73,10 +84,13 @@ export default function App(){
     }
     setSel(id);
   }
+
   function move(id,x,z){
     setMachines(machines.map(m=>m.id===id?{...m,x,z}:m));
   }
+
   function rename(v){ setMachines(machines.map(m=>m.id===sel?{...m,name:v}:m)); }
+
   function del(){
     setMachines(machines.filter(m=>m.id!==sel));
     setBelts(belts.filter(b=>b.from!==sel&&b.to!==sel));
@@ -88,33 +102,50 @@ export default function App(){
       <aside style={{padding:16,borderRight:'1px solid #ddd',background:'#fff'}}>
         <h2>Factory Builder</h2>
         <p>Click floor to add · Alt+Drag to move</p>
+
         {types.map(t=> (
-          <button key={t.id} onClick={()=>setType(t.id)} style={{display:'block',width:'100%',marginBottom:8,padding:10,background:t.color,color:'#fff',border:type===t.id?'2px solid #111':'1px solid #ccc'}}>{t.label}</button>
+          <button key={t.id} onClick={()=>setType(t.id)} style={{display:'block',width:'100%',marginBottom:8,padding:10,background:t.color,color:'#fff'}}>
+            {t.label}
+          </button>
         ))}
-        {selected? (
+
+        <h3>Simulation</h3>
+        <button onClick={()=>setRunning(!running)} style={{width:'100%',marginBottom:8}}>
+          {running ? 'Pause' : 'Start'}
+        </button>
+
+        <input type="range" min="0.1" max="1.5" step="0.05" value={speed} onChange={e=>setSpeed(Number(e.target.value))} />
+
+        {selected && (
           <>
-            <input value={selected.name} onChange={e=>rename(e.target.value)} style={{width:'100%',marginTop:8}}/>
-            <button onClick={()=>setConnectFrom(selected.id)} style={{width:'100%',marginTop:8}}>Connect</button>
-            <button onClick={del} style={{width:'100%',marginTop:8}}>Delete</button>
+            <input value={selected.name} onChange={e=>rename(e.target.value)} style={{width:'100%'}} />
+            <button onClick={()=>setConnectFrom(selected.id)}>Connect</button>
+            <button onClick={del}>Delete</button>
           </>
-        ):<p>No selection</p>}
-        {connectFrom && <p>Click target machine</p>}
+        )}
+
         <p>M: {machines.length} · C: {belts.length}</p>
       </aside>
-      <main>
-        <Canvas camera={{position:[8,8,8]}}>
-          <ambientLight intensity={0.7}/>
-          <directionalLight position={[5,10,5]}/>
-          <gridHelper args={[24,24]}/>
-          <mesh rotation={[-Math.PI/2,0,0]} onClick={(e)=>add(snap(e.point.x),snap(e.point.z))}>
-            <planeGeometry args={[24,24]}/>
-            <meshStandardMaterial color="#f8fafc"/>
-          </mesh>
-          {belts.map(b=> byId[b.from]&&byId[b.to] ? <Conveyor key={b.id} from={byId[b.from]} to={byId[b.to]}/> : null)}
-          {machines.map(m=> <Machine key={m.id} m={m} selected={sel===m.id} onSelect={select} onMove={move}/>) }
-          <OrbitControls/>
-        </Canvas>
-      </main>
+
+      <Canvas camera={{position:[8,8,8]}}>
+        <ambientLight />
+        <gridHelper args={[24,24]} />
+
+        <mesh rotation={[-Math.PI/2,0,0]} onClick={(e)=>add(snap(e.point.x),snap(e.point.z))}>
+          <planeGeometry args={[24,24]} />
+          <meshStandardMaterial color="#f8fafc" />
+        </mesh>
+
+        {belts.map(b=> byId[b.from]&&byId[b.to] ? (
+          <Conveyor key={b.id} from={byId[b.from]} to={byId[b.to]} running={running} speed={speed} />
+        ) : null)}
+
+        {machines.map(m=> (
+          <Machine key={m.id} m={m} selected={sel===m.id} onSelect={select} onMove={move} />
+        ))}
+
+        <OrbitControls />
+      </Canvas>
     </div>
   );
 }
